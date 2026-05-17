@@ -3,5 +3,28 @@ name = "shl-assessment"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.9"
+dependencies = [
+    "aiofiles",
+    "alembic",
+    "chromadb",
+    "fastapi",
+    "google-generativeai",
+    "gunicorn",
+    "httpx",
+    "numpy",
+    "pandas",
+    "psycopg2-binary",
+    "pydantic",
+    "pydantic-settings",
+    "pytest",
+    "pytest-asyncio",
+    "python-dotenv",
+    "requests",
+    "scikit-learn",
+    "sentence-transformers",
+    "sqlalchemy",
+    "structlog",
+    "tqdm",
+    "uvicorn",
+]

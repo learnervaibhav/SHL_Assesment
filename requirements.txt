@@ -1,0 +1,47 @@
+# SHL Assessment Recommender - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# FastAPI & Web Framework
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+
+# Google Gemini LLM
+google-generativeai
+
+# Vector Search & Embeddings
+sentence-transformers
+scikit-learn
+numpy
+
+# Data Processing
+requests
+pandas
+
+# In-memory Vector Store
+chromadb
+
+# Database & ORM
+sqlalchemy
+alembic
+
+# Logging & Monitoring
+python-dotenv
+structlog
+
+# Testing
+pytest
+pytest-asyncio
+httpx
+
+# Optional: Performance & Utilities
+aiofiles
+tqdm
+
+# Deployment
+gunicorn
+
+# PostgreSQL Support (for Neon)
+psycopg2-binary
+

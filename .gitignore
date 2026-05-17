@@ -9,5 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Project folders
+scripts/
+
 # other files
 implementation.md
+
