@@ -31,11 +31,7 @@ from src.agent import SHLRecommendationAgent
 # Initialize App
 # ============================================================================
 
-app = FastAPI(
-    title="SHL Assessment Recommender",
-    description="Multi-turn conversational agent for SHL assessment recommendations",
-    version="2.0",
-)
+# App will be created after defining the lifespan manager so startup runs correctly
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,12 +48,33 @@ async def lifespan(app: FastAPI):
     # Preload agent to avoid cold-start latency
     agent = SHLRecommendationAgent()
 
+    # Pre-warm heavy components to avoid cold-start on first request.
+    try:
+        # Initialize retriever (loads FAISS index and id mappings)
+        print("Prewarming retriever (may take a few seconds)...")
+        agent._init_retriever()
+        # Initialize LLM client only if API key is present to avoid raising errors
+        if os.getenv("GOOGLE_API_KEY"):
+            print("Prewarming LLM client...")
+            agent._init_llm()
+    except Exception as e:
+        print(f"Prewarm warning: failed to pre-initialize components: {e}")
+
     print("Agent and database initialized")
 
     yield
 
     # Shutdown logic (optional cleanup)
     print("Application shutdown complete")
+
+
+# Create FastAPI app with the lifespan manager so startup logic runs
+app = FastAPI(
+    title="SHL Assessment Recommender",
+    description="Multi-turn conversational agent for SHL assessment recommendations",
+    version="2.0",
+    lifespan=lifespan,
+)
 
 # Global agent instance (will be set on startup)
 agent: Optional[SHLRecommendationAgent] = None
@@ -178,12 +195,13 @@ async def chat(
             )
         
         try:
+            # Increased timeout to 35s (evaluator cap is 30s, but we need buffer for DB ops)
             response = await asyncio.wait_for(
                 asyncio.to_thread(agent.run, request.messages),
-                timeout=28.0
+                timeout=35.0
             )
         except asyncio.TimeoutError:
-            print(f" Agent timeout for {conversation_id} after 28 seconds")
+            print(f" Agent timeout for {conversation_id} after 35 seconds")
             raise HTTPException(
                 status_code=504,
                 detail={

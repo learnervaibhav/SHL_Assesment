@@ -5,9 +5,10 @@ Combines TF-IDF/keyword matching with semantic similarity for effective retrieva
 
 import json
 import numpy as np
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Tuple
 from pathlib import Path
 import sys
+from functools import lru_cache
 
 
 class HybridRetriever:
@@ -39,6 +40,8 @@ class HybridRetriever:
         self.id_mapping: Dict = {}
         self.reverse_id_mapping : Dict= {}
         self.embedding_model = None
+        self.query_cache: Dict[str, List[Dict]] = {}  # Simple cache for frequent queries
+        self.max_cache_size = 50  # Limit cache to 50 queries
         
         self._load_data()
     
@@ -122,9 +125,9 @@ class HybridRetriever:
         
         return scores
     
-    def _semantic_search(self, query: str, k: int = 100) -> Dict[str, float]:
+    def _semantic_search(self, query: str, k: int = 20) -> Dict[str, float]:
         """
-        Semantic search using FAISS embeddings
+        Semantic search using FAISS embeddings (optimized k=20 for speed)
         Returns: {assessment_id: similarity_score}
         """
         if self.faiss_index is None:
@@ -153,27 +156,43 @@ class HybridRetriever:
         
         return scores
     
+    
+    def _make_hashable(self, obj):
+        """Convert unhashable types (lists, dicts) to hashable equivalents for caching"""
+        if isinstance(obj, list):
+            return tuple(self._make_hashable(item) for item in obj)
+        elif isinstance(obj, dict):
+            return tuple(sorted((k, self._make_hashable(v)) for k, v in obj.items()))
+        else:
+            return obj
+    
     def search(
         self,
         query: str,
         constraints: Optional[Dict] = None,
         limit: int = 10,
-        keyword_weight: float = 0.3,
-        semantic_weight: float = 0.7,
+        keyword_weight: float = 0.5,
+        semantic_weight: float = 0.5,
     ) -> List[Dict]:
         """
-        Hybrid search combining keyword and semantic results
+        Hybrid search combining keyword and semantic results (optimized weights for speed)
         
         Args:
             query: Search query string
             constraints: Optional constraints (job_levels, keys/categories, languages)
             limit: Maximum number of results
-            keyword_weight: Weight for keyword search scores (0-1)
-            semantic_weight: Weight for semantic search scores (0-1)
+            keyword_weight: Weight for keyword search scores (0-1) — increased to 0.5 for faster path
+            semantic_weight: Weight for semantic search scores (0-1) — reduced to 0.5 for speed
         
         Returns:
             List of assessment dictionaries, sorted by relevance
         """
+        # Check cache first (convert constraints to hashable form)
+        constraints_hashable = self._make_hashable(constraints) if constraints else None
+        cache_key = (query, constraints_hashable, limit)
+        if cache_key in self.query_cache:
+            return self.query_cache[cache_key]
+        
         # Get keyword scores
         keyword_scores = self._keyword_search(query)
         
@@ -188,9 +207,14 @@ class HybridRetriever:
             combined = (keyword_weight * kw_score) + (semantic_weight * sem_score)
             combined_scores[assessment_id] = combined
         
+        print(f"   [Retriever] Query: '{query[:50]}...'")
+        print(f"   [Retriever] Combined scores before filtering: {len(combined_scores)} assessments")
+        
         # Apply constraints
         if constraints:
+            print(f"   [Retriever] Applying constraints: {list(constraints.keys())}")
             combined_scores = self._apply_constraints(combined_scores, constraints)
+            print(f"   [Retriever] After constraint filtering: {len(combined_scores)} assessments")
         
         # Sort and limit
         sorted_ids = sorted(
@@ -206,6 +230,14 @@ class HybridRetriever:
             if assessment_id in self.assessments
         ]
         
+        print(f"   [Retriever] Final results: {len(results)} assessments returned")
+        
+        # Cache result (simple LRU-like eviction)
+        if len(self.query_cache) >= self.max_cache_size:
+            # Remove oldest entry (first item in dict since Python 3.7+ preserves insertion order)
+            self.query_cache.pop(next(iter(self.query_cache)))
+        self.query_cache[cache_key] = results
+        
         return results
     
     def _apply_constraints(self, scores: Dict[str, float], constraints: Dict) -> Dict[str, float]:
@@ -216,7 +248,17 @@ class HybridRetriever:
             - job_levels: List of required job levels
             - keys: List of required assessment categories
             - languages: List of required languages
+            - test_types: List of required test types (cognitive, personality, situational_judgement, etc.)
         """
+        # Map user test types to assessment keys (exact names from assessments.json)
+        test_type_to_keys = {
+            "cognitive": ["Ability & Aptitude"],
+            "personality": ["Personality & Behavior"],
+            "situational_judgement": ["Biodata & Situational Judgment"],
+            "leadership": ["Competencies", "Assessment Exercises"],
+            "skills": ["Knowledge & Skills"],
+        }
+        
         filtered_scores = {}
         
         for assessment_id, score in scores.items():
@@ -236,11 +278,28 @@ class HybridRetriever:
                           for key in constraints["keys"]):
                     continue
             
-            # Check languages
-            if "languages" in constraints and constraints["languages"]:
-                if not any(lang in assessment.get("languages", []) 
-                          for lang in constraints["languages"]):
+            # Check languages (case-insensitive partial match; skip if assessment has no languages specified)
+            assessment_langs = assessment.get("languages", [])
+            if "languages" in constraints and constraints["languages"] and assessment_langs:
+                # Only apply language filter if assessment explicitly specifies languages
+                constraint_langs_lower = [lang.lower() for lang in constraints["languages"]]
+                if not any(any(constraint_lang in assessment_lang.lower() 
+                              for constraint_lang in constraint_langs_lower)
+                          for assessment_lang in assessment_langs):
                     continue
+            
+            # Check test types (map user test types to assessment keys)
+            if "test_types" in constraints and constraints["test_types"]:
+                required_keys = []
+                for test_type in constraints["test_types"]:
+                    if test_type in test_type_to_keys:
+                        required_keys.extend(test_type_to_keys[test_type])
+                
+                # Assessment must have at least one matching key
+                if required_keys:
+                    assessment_keys = assessment.get("keys", [])
+                    if not any(key in assessment_keys for key in required_keys):
+                        continue
             
             filtered_scores[assessment_id] = score
         

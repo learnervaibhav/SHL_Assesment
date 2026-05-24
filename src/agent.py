@@ -42,11 +42,12 @@ class SHLRecommendationAgent:
     def __init__(self):
         """Initialize agent with all required components"""
         self.context_extractor = ContextExtractor()
-        self.llm_client   # Lazy-loaded
-        self.retriever    # Lazy-loaded
+        # Lazy-loaded clients and components (initialize to None)
+        self.llm_client = None
+        self.retriever = None
         self.catalog_loader = CatalogLoader()
-        self.graph 
-        
+        self.graph = None
+
         # Build the agent graph
         self._build_graph()
     
@@ -150,6 +151,10 @@ class SHLRecommendationAgent:
         
         context = self.context_extractor.extract(state["messages"])
         
+        print(f"   [Context] Intent: {context.intent[:60]}...")
+        print(f"   [Context] Constraints: {context.constraints}")
+        print(f"   [Context] Turn count: {context.turn_count}")
+        
         state.update({
             "context": context,
             "intent": context.intent,
@@ -218,14 +223,14 @@ class SHLRecommendationAgent:
         
         self._init_retriever()
         
-        # Perform hybrid retrieval
+        # Perform hybrid retrieval (optimized weights: keyword-heavy for speed)
         query = state["intent"]
         results = self.retriever.search(
             query,
             constraints=state["constraints"],
             limit=20,
-            keyword_weight=0.3,
-            semantic_weight=0.7,
+            keyword_weight=0.5,
+            semantic_weight=0.5,
         )
         
         state["retrieved_assessments"] = results

@@ -151,6 +151,11 @@ class ContextExtractor:
         if languages:
             constraints["languages"] = languages
         
+        # Extract test types (cognitive, personality, SJT, etc.)
+        test_types = self._extract_test_types(text_lower)
+        if test_types:
+            constraints["test_types"] = test_types
+        
         return constraints
     
     def _extract_skills(self, text_lower: str) -> List[str]:
@@ -217,6 +222,24 @@ class ContextExtractor:
                 found_languages.append(lang)
         
         return found_languages
+    
+    def _extract_test_types(self, text_lower: str) -> List[str]:
+        """Extract test type requirements from text (cognitive, personality, SJT, etc.)"""
+        
+        test_type_keywords = {
+            "cognitive": ["cognitive ability", "cognitive test", "numerical", "verbal", "reasoning"],
+            "personality": ["personality", "personality test", "personality measure", "behavioral"],
+            "situational_judgement": ["situational judgement", "situational judgment", "sjt", "scenario"],
+            "leadership": ["leadership", "leadership potential", "management"],
+            "skills": ["skills test", "skill assessment", "skills"],
+        }
+        
+        found_types = []
+        for test_type, keywords in test_type_keywords.items():
+            if any(kw in text_lower for kw in keywords):
+                found_types.append(test_type)
+        
+        return found_types
     
     def _extract_prior_recommendations(self, messages: List[Dict[str, str]]) -> List[str]:
         """Extract assessment names from prior recommendations"""
