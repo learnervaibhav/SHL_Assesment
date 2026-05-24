@@ -1,3 +1,9 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+.env.docker
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -5,13 +11,46 @@ build/
 dist/
 wheels/
 *.egg-info
+*.so
+.Python
 
 # Virtual environments
 .venv
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Docker
+docker-compose.override.yml
+
+# Data files
+*.faiss
+*.pkl
+*.pickle
+
+# Logs
+*.log
+logs/
 
 # Project folders
 scripts/
 
-# other files
+# Other files
 implementation.md
+ALIGNMENT_CHECK.md
+FIXES_APPLIED.md
+FIXES_COMPLETE.md
 

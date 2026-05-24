@@ -2,25 +2,29 @@
 # Install with: pip install -r requirements.txt
 
 # FastAPI & Web Framework
-fastapi
+fastapi[standard]
 uvicorn
 pydantic
 pydantic-settings
 
 # Google Gemini LLM
-google-generativeai
+google-genai
+
+# LangGraph for Agent Orchestration
+langgraph
 
 # Vector Search & Embeddings
 sentence-transformers
 scikit-learn
 numpy
+faiss-cpu
 
 # Data Processing
 requests
 pandas
 
 # In-memory Vector Store
-chromadb
+# (Using FAISS instead of Chromadb)
 
 # Database & ORM
 sqlalchemy
@@ -44,4 +48,3 @@ gunicorn
 
 # PostgreSQL Support (for Neon)
 psycopg2-binary
-
