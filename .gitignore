@@ -36,8 +36,7 @@ env/
 # Docker
 docker-compose.override.yml
 
-# Data files
-*.faiss
+# Data files (keep .faiss for production deployment)
 *.pkl
 *.pickle
 
