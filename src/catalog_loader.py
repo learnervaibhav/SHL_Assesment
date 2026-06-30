@@ -36,8 +36,19 @@ class CatalogLoader:
         return self.assessment_by_id.get(assessment_id)
     
     def get_by_name(self, name: str) -> Optional[Dict]:
-        """Get assessment by name (case-insensitive)"""
-        return self.assessment_by_name.get(name.lower())
+        """Get assessment by name (case-insensitive exact match, then substring)"""
+        # Try exact match first
+        result = self.assessment_by_name.get(name.lower())
+        if result:
+            return result
+        
+        # Fallback: substring match (LLM may return partial names like 'OPQ32r')
+        name_lower = name.lower()
+        for catalog_name, assessment in self.assessment_by_name.items():
+            if name_lower in catalog_name or catalog_name in name_lower:
+                return assessment
+        
+        return None
     
     def get_all(self) -> List[Dict]:
         """Get all assessments"""

@@ -48,8 +48,5 @@ logs/
 scripts/
 
 # Other files
-implementation.md
-ALIGNMENT_CHECK.md
-FIXES_APPLIED.md
-FIXES_COMPLETE.md
+APPROACH.md
 

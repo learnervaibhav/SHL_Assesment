@@ -70,8 +70,8 @@ class ContextExtractor:
         # Extract constraints
         constraints = self._extract_constraints(text_lower)
         
-        # Count turns
-        turn_count = len(messages)
+        # Count turns (only user messages count as turns)
+        turn_count = sum(1 for m in messages if m["role"] == "user")
         
         # Extract prior recommendations (from assistant messages)
         prior_recommendations = self._extract_prior_recommendations(messages)
@@ -227,7 +227,7 @@ class ContextExtractor:
         """Extract test type requirements from text (cognitive, personality, SJT, etc.)"""
         
         test_type_keywords = {
-            "cognitive": ["cognitive ability", "cognitive test", "numerical", "verbal", "reasoning"],
+            "cognitive": ["cognitive", "cognitive ability", "cognitive test", "numerical", "verbal", "reasoning"],
             "personality": ["personality", "personality test", "personality measure", "behavioral"],
             "situational_judgement": ["situational judgement", "situational judgment", "sjt", "scenario"],
             "leadership": ["leadership", "leadership potential", "management"],

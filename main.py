@@ -1,8 +1,3 @@
-"""
-Main FastAPI application for SHL Assessment Recommender
-Endpoints: GET /health, POST /chat
-"""
-
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -18,7 +13,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-# Load environment variables from .env file
+
 load_dotenv(Path(__file__).parent / ".env")
 
 from src.models import (
@@ -27,11 +22,7 @@ from src.models import (
 from src.database import get_db, init_db, Conversation, MessageRecord, RecommendationRecord, AccessLog
 from src.agent import SHLRecommendationAgent
 
-# ============================================================================
-# Initialize App
-# ============================================================================
 
-# App will be created after defining the lifespan manager so startup runs correctly
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

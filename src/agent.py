@@ -3,9 +3,14 @@ LangGraph-based Agent for orchestrating the chat flow
 Implements the state machine: clarify -> retrieve -> rank -> format -> output
 """
 
+from pathlib import Path
 from typing import List, Dict, Any, Optional, TypedDict, Annotated
+from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 import operator
+
+# Load environment variables for standalone execution
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 from src.context import ContextExtractor, ExtractedContext
 from src.llm_client import GeminiClient
@@ -38,7 +43,19 @@ class AgentState(TypedDict):
 
 class SHLRecommendationAgent:
     """LangGraph-based agent for SHL assessment recommendations"""
-    
+
+    # Maps assessment category keys to single-letter test type codes
+    KEY_TO_CODE = {
+        "Ability & Aptitude": "A",
+        "Assessment Exercises": "A",
+        "Biodata & Situational Judgment": "B",
+        "Competencies": "C",
+        "Development & 360": "D",
+        "Knowledge & Skills": "K",
+        "Personality & Behavior": "P",
+        "Simulations": "S",
+    }
+
     def __init__(self):
         """Initialize agent with all required components"""
         self.context_extractor = ContextExtractor()
@@ -60,7 +77,19 @@ class SHLRecommendationAgent:
         """Lazy-load retriever"""
         if self.retriever is None:
             self.retriever = HybridRetriever()
-    
+
+    def _get_test_type_code(self, assessment: Dict) -> str:
+        """Convert assessment keys to comma-separated test type codes (e.g. 'P,C')"""
+        keys = assessment.get("keys", [])
+        codes = []
+        seen = set()
+        for key in keys:
+            code = self.KEY_TO_CODE.get(key, key[0].upper() if key else "?")
+            if code not in seen:
+                codes.append(code)
+                seen.add(code)
+        return ",".join(codes) if codes else "N"
+
     def _build_graph(self):
         """Build LangGraph state machine"""
         
@@ -83,7 +112,7 @@ class SHLRecommendationAgent:
             "check_turn_limit",
             self.should_terminate,
             {
-                True: "format_response",  # Hit turn limit, format best-effort
+                True: "retrieve_assessments",  # Hit turn limit, still retrieve before formatting
                 False: "llm_decision"
             }
         )
@@ -124,7 +153,7 @@ class SHLRecommendationAgent:
             "context": None,
             "intent": "",
             "constraints": {},
-            "turn_count": len(message_dicts),
+            "turn_count": sum(1 for m in message_dicts if m["role"] == "user"),
             "llm_decision": None,
             "retrieved_assessments": [],
             "recommendations": [],
@@ -165,10 +194,16 @@ class SHLRecommendationAgent:
         return state
     
     def node_check_turn_limit(self, state: AgentState) -> AgentState:
-        """Check if we've hit the turn limit (8 turns)"""
-        # Logic handled in conditional edge
+        """Check if we've hit the turn limit (8 user turns)"""
+        if state["turn_count"] >= 8:
+            # Set a default LLM decision for best-effort recommendation
+            state["llm_decision"] = {
+                "action": "recommend",
+                "response": "We've reached the maximum number of conversation turns. Based on our discussion, here are the most relevant assessments for your needs:",
+                "assessment_names": [],
+            }
         return state
-    
+
     def should_terminate(self, state: AgentState) -> bool:
         """Decide whether to terminate conversation"""
         return state["turn_count"] >= 8
@@ -197,15 +232,15 @@ class SHLRecommendationAgent:
         state["llm_decision"] = decision
         
         # DEBUG: Log the decision
-        print(f"🤖 LLM Response: action='{decision.get('action')}', response='{decision.get('response', '')[:100]}...'")
+        print(f"  [LLM] action='{decision.get('action')}', response='{decision.get('response', '')[:100]}...'")
         
         return state
     
     def should_rank(self, state: AgentState) -> bool:
-        """Check if we need to retrieve and rank assessments"""
-        decision = state.get("llm_decision", {})
+        """Check if we need to rank assessments (compare produces no recommendations)"""
+        decision = state.get("llm_decision") or {}
         action = decision.get("action", "")
-        return action in ["recommend", "refine", "compare"]
+        return action in ["recommend", "refine"]
     
     def node_retrieve_assessments(self, state: AgentState) -> AgentState:
         """Retrieve assessments based on context"""
@@ -214,10 +249,10 @@ class SHLRecommendationAgent:
         action = decision.get("action", "clarify")
         
         # DEBUG: Log the action
-        print(f"🔍 Retrieve Node: action='{action}'")
+        print(f" Retrieve Node: action='{action}'")
         
-        if action not in ["recommend", "refine", "compare"]:
-            print(f"⚠️  Skipping retrieval because action is '{action}', not in ['recommend', 'refine', 'compare']")
+        if action not in ["recommend", "refine"]:
+            print(f"  Skipping retrieval for action '{action}'")
             state["retrieved_assessments"] = []
             return state
         
@@ -254,7 +289,7 @@ class SHLRecommendationAgent:
         for assessment in state["retrieved_assessments"]:
             url = assessment.get("url", "")
             if not self.catalog_loader.validate_url(url):
-                print(f"❌ Invalid URL detected: {url}")
+                print(f" Invalid URL detected: {url}")
                 # Remove invalid URLs
                 state["retrieved_assessments"] = [
                     a for a in state["retrieved_assessments"]
@@ -266,54 +301,66 @@ class SHLRecommendationAgent:
     
     def node_format_response(self, state: AgentState) -> AgentState:
         """Format final response"""
-        
-        decision = state.get("llm_decision", {})
+
+        decision = state.get("llm_decision") or {}
         action = decision.get("action", "clarify")
-        
+        llm_names = decision.get("assessment_names", [])
+
         # DEBUG: Log what the LLM decided
-        print(f"🔍 LLM Decision: action='{action}', retrieved_assessments={len(state['retrieved_assessments'])}")
-        
+        print(f"  [Format] action='{action}', retrieved={len(state['retrieved_assessments'])}, llm_names={len(llm_names)}")
+
         # Build response text
         response_text = decision.get("response", "")
-        
+
         # Build recommendations based on action
         recommendations = []
         end_of_conversation = False
-        
-        if action in ["recommend", "refine", "compare"]:
-            # Create Recommendation objects
-            for idx, assessment in enumerate(state["retrieved_assessments"][:10]):
+
+        if action in ["recommend", "refine"]:
+            # First, try to resolve LLM-selected assessment names from catalog
+            resolved_from_llm = []
+            for name in llm_names:
+                assessment = self.catalog_loader.get_by_name(name)
+                if assessment:
+                    resolved_from_llm.append(assessment)
+
+            # Use LLM selections if available, otherwise fall back to retriever results
+            source_assessments = resolved_from_llm if resolved_from_llm else state["retrieved_assessments"]
+
+            for assessment in source_assessments[:10]:
                 recommendations.append(
                     Recommendation(
                         name=assessment["name"],
                         url=assessment["url"],
-                        test_type=assessment.get("keys", [""])[0][0] if assessment.get("keys") else "N"
+                        test_type=self._get_test_type_code(assessment),
                     )
                 )
-            
-            # Mark as end if this was the final recommendation
-            if action == "recommend" and state["turn_count"] >= 7:
-                end_of_conversation = True
-        
-        # Handle turn limit scenarios
-        if state["turn_count"] >= 8 and not recommendations:
-            # Force best-effort shortlist
-            for idx, assessment in enumerate(state["retrieved_assessments"][:5]):
-                recommendations.append(
-                    Recommendation(
-                        name=assessment["name"],
-                        url=assessment["url"],
-                        test_type=assessment.get("keys", [""])[0][0] if assessment.get("keys") else "N"
-                    )
-                )
+
+        # compare, clarify: no recommendations (response text only)
+        # refuse: no recommendations, end conversation
+
+        if action == "refuse":
             end_of_conversation = True
-        
+
+        # Turn limit forces end of conversation
+        if state["turn_count"] >= 8:
+            end_of_conversation = True
+
+        # Provide default response text if LLM returned empty
+        if not response_text:
+            if action == "clarify":
+                response_text = "Could you share the role, seniority level, and assessment types you're looking for?"
+            elif action == "refuse":
+                response_text = "I can only help with SHL assessment recommendations. Let me know if you have a hiring need I can assist with."
+            elif recommendations:
+                response_text = "Here are the most relevant SHL assessments for your requirements:"
+
         state.update({
             "response_text": response_text,
             "recommendations": recommendations,
-            "end_of_conversation": end_of_conversation or action == "refuse",
+            "end_of_conversation": end_of_conversation,
         })
-        
+
         return state
 
 
@@ -327,7 +374,7 @@ if __name__ == "__main__":
     ]
     
     response = agent.run(test_messages)
-    print(f"\n✓ Agent response:")
+    print(f"\nAgent response:")
     print(f"  Reply: {response.reply[:100]}...")
     print(f"  Recommendations: {len(response.recommendations)}")
     print(f"  End: {response.end_of_conversation}")

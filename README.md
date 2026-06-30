@@ -10,7 +10,7 @@ SHL Assessment Recommender is a multi-turn conversational agent that helps hirin
 
 ## Key Features
 
-- Multi-turn conversational interface with 8-turn conversation limit
+- Multi-turn conversational interface with 8 user-turn conversation limit
 - Hybrid retrieval combining keyword search and semantic similarity (FAISS)
 - Intelligent constraint filtering (job levels, test types, languages, assessment categories)
 - LangGraph-based state machine orchestration with deterministic workflow
@@ -139,7 +139,7 @@ Response:
     {
       "name": "Assessment Name",
       "url": "https://www.shl.com/products/...",
-      "test_type": "cognitive|personality|situational_judgement|..."
+      "test_type": "A|B|C|D|K|P|S (comma-separated for multi-category)"
     }
   ],
   "end_of_conversation": false,
@@ -253,4 +253,3 @@ https://vaibhavbaranwal.me.
 
 ---
 
-Last Updated: May 25, 2026
