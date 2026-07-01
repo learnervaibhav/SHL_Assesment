@@ -41,9 +41,13 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm heavy components to avoid cold-start on first request.
     try:
-        # Initialize retriever (loads FAISS index and id mappings)
+        # Initialize retriever (loads FAISS index, id mappings, AND embedding model)
         print("Prewarming retriever (may take a few seconds)...")
         agent._init_retriever()
+        # Force-load the embedding model by running a dummy search
+        # This prevents the first /chat request from paying the cold-start penalty
+        agent.retriever.search("warmup query", constraints={}, limit=1)
+        print("Retriever fully warmed (embedding model loaded)")
         # Initialize LLM client only if API key is present to avoid raising errors
         if os.getenv("GOOGLE_API_KEY"):
             print("Prewarming LLM client...")
@@ -186,13 +190,12 @@ async def chat(
             )
         
         try:
-            # Increased timeout to 35s (evaluator cap is 30s, but we need buffer for DB ops)
             response = await asyncio.wait_for(
                 asyncio.to_thread(agent.run, request.messages),
-                timeout=35.0
+                timeout=120.0
             )
         except asyncio.TimeoutError:
-            print(f" Agent timeout for {conversation_id} after 35 seconds")
+            print(f" Agent timeout for {conversation_id} after 120 seconds")
             raise HTTPException(
                 status_code=504,
                 detail={
