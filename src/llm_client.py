@@ -194,10 +194,10 @@ Now return exactly one JSON object.
 
     def generate_catalog_summary(self, assessments: List[Dict[str, Any]]) -> str:
         """
-        Generate a compact catalog summary for prompting.
+        Generate a complete catalog summary for prompting.
 
-        Groups assessments by their keys/categories and keeps only a small
-        representative sample to limit prompt size.
+        Groups assessments by their keys/categories and includes ALL names
+        so the LLM can accurately select from the full catalog.
         """
         by_category: Dict[str, List[str]] = {}
 
@@ -214,16 +214,14 @@ Now return exactly one JSON object.
                     continue
                 by_category.setdefault(key_str, []).append(name)
 
-        lines = ["Catalog summary by assessment type:"]
-        for category in sorted(by_category.keys())[:12]:
+        lines = ["Catalog summary by assessment type (COMPLETE LIST — only use names from this list):"]
+        for category in sorted(by_category.keys()):
             names = []
             seen = set()
             for name in by_category[category]:
                 if name not in seen:
                     names.append(name)
                     seen.add(name)
-                if len(names) >= 6:
-                    break
             lines.append(f"{category}:")
             for name in names:
                 lines.append(f"  - {name}")

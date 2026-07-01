@@ -243,7 +243,7 @@ class SHLRecommendationAgent:
         return action in ["recommend", "refine"]
     
     def node_retrieve_assessments(self, state: AgentState) -> AgentState:
-        """Retrieve assessments based on context"""
+        """Retrieve assessments based on context, with graceful fallback"""
         
         decision = state.get("llm_decision", {})
         action = decision.get("action", "clarify")
@@ -258,7 +258,7 @@ class SHLRecommendationAgent:
         
         self._init_retriever()
         
-        # Perform hybrid retrieval (optimized weights: keyword-heavy for speed)
+        # Perform hybrid retrieval
         query = state["intent"]
         results = self.retriever.search(
             query,
@@ -267,6 +267,25 @@ class SHLRecommendationAgent:
             keyword_weight=0.5,
             semantic_weight=0.5,
         )
+        
+        # Fallback: if constraints produced fewer than 3 results, retry without
+        # constraints to backfill with broader matches
+        if len(results) < 3 and state.get("constraints"):
+            print(f"   [Retriever] Only {len(results)} results with constraints — retrying without constraints")
+            unconstrained_results = self.retriever.search(
+                query,
+                constraints=None,
+                limit=20,
+                keyword_weight=0.5,
+                semantic_weight=0.5,
+            )
+            # Append unconstrained results that aren't already in the list
+            existing_ids = {r["id"] for r in results}
+            for r in unconstrained_results:
+                if r["id"] not in existing_ids:
+                    results.append(r)
+                    existing_ids.add(r["id"])
+            print(f"   [Retriever] After fallback: {len(results)} total results")
         
         state["retrieved_assessments"] = results
         

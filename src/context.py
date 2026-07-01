@@ -88,23 +88,41 @@ class ContextExtractor:
         )
     
     def _extract_intent(self, messages: List[Dict[str, str]], text_lower: str) -> str:
-        """Extract hiring need/intent from conversation"""
+        """Extract hiring need/intent from the full conversation history.
         
-        # Get latest user message as primary intent
+        Builds a composite query from ALL user messages so that multi-turn
+        context is preserved. Short confirmation phrases (e.g. "yes", "US",
+        "perfect") are filtered out since they add no retrieval value.
+        """
+        
         user_messages = [m["content"] for m in messages if m["role"] == "user"]
         if not user_messages:
             return "hiring assessment"
         
-        latest_user = user_messages[-1].lower()
+        # Filter out very short confirmation-like messages that hurt retrieval
+        # Keep messages that have substantive content (> 4 words or > 20 chars)
+        substantive_messages = []
+        for msg in user_messages:
+            words = msg.strip().split()
+            if len(words) > 4 or len(msg.strip()) > 20:
+                substantive_messages.append(msg.strip())
         
-        # Look for role keywords in latest message
+        # If all messages were short, use the longest one as fallback
+        if not substantive_messages:
+            substantive_messages = [max(user_messages, key=len)]
+        
+        # Combine all substantive user messages into a composite query
+        composite = " ".join(substantive_messages).lower()
+        
+        # Look for role keywords in the composite text
         for role_type, keywords in self.ROLE_KEYWORDS.items():
             for keyword in keywords:
-                if keyword in latest_user:
-                    return f"{role_type} role assessment"
+                if keyword in composite:
+                    # Prepend role type but keep the full composite for retrieval
+                    return f"{role_type} role assessment {composite}"[:200]
         
-        # Fallback: use first 100 chars of latest user message
-        return latest_user[:100] if latest_user else "hiring assessment"
+        # Fallback: use the composite query (capped at 200 chars)
+        return composite[:200] if composite else "hiring assessment"
     
     def _extract_constraints(self, text_lower: str) -> Dict[str, Any]:
         """Extract role, seniority, skills, industries from text"""

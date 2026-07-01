@@ -210,11 +210,26 @@ class HybridRetriever:
         print(f"   [Retriever] Query: '{query[:50]}...'")
         print(f"   [Retriever] Combined scores before filtering: {len(combined_scores)} assessments")
         
-        # Apply constraints
+        # Apply constraints (only those that map to actual assessment data fields)
         if constraints:
-            print(f"   [Retriever] Applying constraints: {list(constraints.keys())}")
-            combined_scores = self._apply_constraints(combined_scores, constraints)
-            print(f"   [Retriever] After constraint filtering: {len(combined_scores)} assessments")
+            # Only pass constraints that correspond to actual assessment fields
+            # The context extractor may add: seniority, roles, skills, industries
+            # which don't exist on assessment records and would be ignored anyway
+            VALID_CONSTRAINT_KEYS = {"job_levels", "keys", "languages", "test_types"}
+            stripped_keys = set(constraints.keys()) - VALID_CONSTRAINT_KEYS
+            if stripped_keys:
+                print(f"   [Retriever] Ignoring non-assessment constraints: {stripped_keys}")
+            
+            filtered_constraints = {
+                k: v for k, v in constraints.items() if k in VALID_CONSTRAINT_KEYS
+            }
+            
+            if filtered_constraints:
+                print(f"   [Retriever] Applying constraints: {list(filtered_constraints.keys())}")
+                combined_scores = self._apply_constraints(combined_scores, filtered_constraints)
+            else:
+                print(f"   [Retriever] No applicable constraints after filtering")
+            print(f"   [Retriever] After constraint scoring: {len(combined_scores)} assessments")
         
         # Sort and limit
         sorted_ids = sorted(
@@ -242,13 +257,17 @@ class HybridRetriever:
     
     def _apply_constraints(self, scores: Dict[str, float], constraints: Dict) -> Dict[str, float]:
         """
-        Filter scores based on constraints
+        Apply constraints as soft scoring boosts/penalties instead of hard filters.
+        
+        Assessments matching constraints get score boosts; non-matching ones get
+        penalized but are NOT eliminated. This prevents returning 0 results when
+        constraints are overly restrictive.
         
         Constraints:
             - job_levels: List of required job levels
             - keys: List of required assessment categories
             - languages: List of required languages
-            - test_types: List of required test types (cognitive, personality, situational_judgement, etc.)
+            - test_types: List of required test types (cognitive, personality, etc.)
         """
         # Map user test types to assessment keys (exact names from assessments.json)
         test_type_to_keys = {
@@ -259,51 +278,82 @@ class HybridRetriever:
             "skills": ["Knowledge & Skills"],
         }
         
-        filtered_scores = {}
-        
+        adjusted_scores = {}
+
         for assessment_id, score in scores.items():
             assessment = self.assessments.get(assessment_id)
             if not assessment:
                 continue
-            
-            # Check job levels
+
+            boost = 1.0  # Multiplicative boost/penalty factor
+
+            # Record match flags for logging
+            job_level_match = None
+            keys_match = None
+            language_match = None
+            test_type_match = None
+
+            # Check job levels — important signal, moderate penalty for mismatch
             if "job_levels" in constraints and constraints["job_levels"]:
-                if not any(level in assessment.get("job_levels", []) 
-                          for level in constraints["job_levels"]):
-                    continue
-            
-            # Check assessment categories (keys)
+                if any(level in assessment.get("job_levels", [])
+                       for level in constraints["job_levels"]):
+                    job_level_match = True
+                    boost *= 1.5  # Strong boost for matching job level
+                else:
+                    job_level_match = False
+                    boost *= 0.3  # Penalize but keep
+
+            # Check assessment categories (keys) — strong signal
             if "keys" in constraints and constraints["keys"]:
-                if not any(key in assessment.get("keys", []) 
-                          for key in constraints["keys"]):
-                    continue
-            
-            # Check languages (case-insensitive partial match; skip if assessment has no languages specified)
+                if any(key in assessment.get("keys", [])
+                       for key in constraints["keys"]):
+                    keys_match = True
+                    boost *= 1.5  # Strong boost for matching category
+                else:
+                    keys_match = False
+                    boost *= 0.4  # Penalize but keep
+
+            # Check languages — light penalty (many assessments don't list languages)
             assessment_langs = assessment.get("languages", [])
             if "languages" in constraints and constraints["languages"] and assessment_langs:
-                # Only apply language filter if assessment explicitly specifies languages
                 constraint_langs_lower = [lang.lower() for lang in constraints["languages"]]
-                if not any(any(constraint_lang in assessment_lang.lower() 
-                              for constraint_lang in constraint_langs_lower)
-                          for assessment_lang in assessment_langs):
-                    continue
-            
-            # Check test types (map user test types to assessment keys)
+                if any(any(constraint_lang in assessment_lang.lower()
+                           for constraint_lang in constraint_langs_lower)
+                       for assessment_lang in assessment_langs):
+                    language_match = True
+                    boost *= 1.3  # Modest boost for language match
+                else:
+                    language_match = False
+                    boost *= 0.5  # Light penalty — language mismatch is less critical
+
+            # Check test types (map user test types to assessment keys) — strong signal
             if "test_types" in constraints and constraints["test_types"]:
                 required_keys = []
                 for test_type in constraints["test_types"]:
                     if test_type in test_type_to_keys:
                         required_keys.extend(test_type_to_keys[test_type])
-                
-                # Assessment must have at least one matching key
+
                 if required_keys:
                     assessment_keys = assessment.get("keys", [])
-                    if not any(key in assessment_keys for key in required_keys):
-                        continue
-            
-            filtered_scores[assessment_id] = score
-        
-        return filtered_scores
+                    if any(key in assessment_keys for key in required_keys):
+                        test_type_match = True
+                        boost *= 1.5  # Strong boost for matching test type
+                    else:
+                        test_type_match = False
+                        boost *= 0.3  # Penalize but keep
+
+            adjusted = score * boost
+
+            # Detailed debug log per assessment showing match flags and scores
+            print(
+                f"   [ConstraintEval] id={assessment_id} name='{assessment.get('name')[:60]}' "
+                f"orig={score:.3f} boost={boost:.3f} adjusted={adjusted:.3f} "
+                f"job_level={job_level_match} keys={keys_match} lang={language_match} test_type={test_type_match}"
+            )
+
+            adjusted_scores[assessment_id] = adjusted
+
+        return adjusted_scores
     
     def get_assessment_by_name(self, name: str) -> Optional[Dict]:
         """Get assessment by exact name (case-insensitive)"""
